@@ -52,7 +52,9 @@ WITH labeled AS (
     END AS "Recorrente_ou_Spot",
     p.id                                                    AS payment_id,
     p.amount_cents,
-    p.net_amount_cents + p.installment_fee_revenue_cents    AS receita
+    p.net_amount_cents + p.installment_fee_revenue_cents    AS receita,
+    COALESCE(rb.due_date, b.due_date)                       AS due_date,
+    p.paid_at::date                                         AS paid_date
   FROM payments p
   INNER JOIN orders          o  ON o.id  = p.order_id
   INNER JOIN schools         s  ON s.id  = p.school_id
@@ -71,9 +73,10 @@ SELECT
     "Metodo_Pagamento",
     "Produto",
     "Recorrente_ou_Spot",
-    COUNT(DISTINCT payment_id)  AS "Qtd_Transacoes",
-    SUM(amount_cents)           AS "Valor_Transacao",
-    SUM(receita)                AS "Receita_Bruta"
+    COUNT(DISTINCT payment_id)                        AS "Qtd_Transacoes",
+    SUM(amount_cents)                                 AS "Valor_Transacao",
+    SUM(receita)                                      AS "Receita_Bruta",
+    ROUND(AVG(paid_date - due_date))                  AS "Media_Dias_Apos_Vencimento"
 FROM labeled
 GROUP BY
     "Mes",
@@ -93,7 +96,10 @@ router.get("/payments/:schoolId", async (req: Request, res: Response) => {
       runNativeQuery(DATABASE_ID, buildPaymentsQuery(schoolId)),
       runNativeQuery(DATABASE_ID, buildRecurrentCardsQuery(schoolId)),
     ]);
-    res.json({ success: true, data: { payments, recurrent_cards: recurrentCards } });
+    res.json({
+      success: true,
+      data: { payments, recurrent_cards: recurrentCards },
+    });
   } catch (error: any) {
     const detail = error.response?.data ?? error.message;
     console.error("[/payments/:schoolId]", detail);
