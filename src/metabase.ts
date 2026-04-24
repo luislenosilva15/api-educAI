@@ -22,3 +22,14 @@ export async function getCardData(cardId: number) {
   const { data } = await metabaseClient.post(`/api/card/${cardId}/query/json`);
   return data;
 }
+
+export async function runNativeQuery(databaseId: number, query: string) {
+  const { data } = await metabaseClient.post('/api/dataset/json', {
+    query: {
+      database: databaseId,
+      type: 'native',
+      native: { query },
+    },
+  });
+  return data;
+}
