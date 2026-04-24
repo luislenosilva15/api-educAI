@@ -89,16 +89,60 @@ ORDER BY
     "Metodo_Pagamento"
 `;
 
+const buildOverdueRecurrentQuery = (schoolId: number) => `
+SELECT
+    rp_profile.name                                 AS "Responsavel",
+    resp.email                                      AS "Email",
+    STRING_AGG(DISTINCT sp.name, ', ')              AS "Alunos",
+    rplan.title                                     AS "Plano",
+    TO_CHAR(rb.due_date, 'DD/MM/YYYY')              AS "Vencimento",
+    rb.price_cents                                  AS "Valor_Cents",
+    (CURRENT_DATE - rb.due_date)                    AS "Dias_Atraso"
+FROM recurrent_bills rb
+INNER JOIN recurrent_plans rplan ON rplan.id = rb.recurrent_plan_id
+    AND rplan.school_id = ${schoolId}
+    AND rplan.status    = 1
+INNER JOIN edupay_subscribes es ON es.recurrent_plan_id = rplan.id
+    AND es.active        = true
+    AND es.deleted_at   IS NULL
+    AND es.userable_type = 'ResponsibleProfile'
+INNER JOIN responsible_profiles rp_profile ON rp_profile.id = es.userable_id
+    AND rp_profile.deleted_at IS NULL
+LEFT  JOIN responsibles resp ON resp.responsible_profile_id = rp_profile.id
+    AND resp.deleted_at IS NULL
+LEFT  JOIN responsible_profiles_student_profiles rpsp ON rpsp.responsible_profile_id = rp_profile.id
+LEFT  JOIN student_profiles sp ON sp.id = rpsp.student_profile_id
+    AND sp.school_id   = ${schoolId}
+    AND sp.deleted_at IS NULL
+WHERE rb.due_date   < CURRENT_DATE
+  AND rb.school_id  = ${schoolId}
+  AND NOT EXISTS (
+      SELECT 1
+      FROM orders o
+      INNER JOIN payments p ON p.order_id = o.id AND p.status = 3
+      WHERE o.orderable_type = 'RecurrentBill'
+        AND o.orderable_id   = rb.id
+  )
+GROUP BY
+    rp_profile.name,
+    resp.email,
+    rplan.title,
+    rb.due_date,
+    rb.price_cents
+ORDER BY rp_profile.name, rb.due_date
+`;
+
 router.get("/payments/:schoolId", async (req: Request, res: Response) => {
   try {
     const schoolId = Number(req.params.schoolId);
-    const [payments, recurrentCards] = await Promise.all([
+    const [payments, recurrentCards, overdueRecurrent] = await Promise.all([
       runNativeQuery(DATABASE_ID, buildPaymentsQuery(schoolId)),
       runNativeQuery(DATABASE_ID, buildRecurrentCardsQuery(schoolId)),
+      runNativeQuery(DATABASE_ID, buildOverdueRecurrentQuery(schoolId)),
     ]);
     res.json({
       success: true,
-      data: { payments, recurrent_cards: recurrentCards },
+      data: { payments, recurrent_cards: recurrentCards, overdue_recurrent: overdueRecurrent },
     });
   } catch (error: any) {
     const detail = error.response?.data ?? error.message;
